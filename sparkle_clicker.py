@@ -12,6 +12,7 @@
 """
 import argparse
 import ctypes
+import os
 import random
 import re
 import sys
@@ -760,13 +761,32 @@ def handle_dialogs(io, full, dry=False):
 
 def _handle_death(io, crop, words, to_full, k, dry):
     """Окно потопления: круглая кнопка над подписью «Починить и вернуться»."""
+    def is_label(text):
+        # OCR иногда склеивает подпись в одно слово ("Починитьивернуться") - ищем и части
+        t = _norm(text)
+        return (_like(text, "вернуться", 0.7) or _like(text, "починить", 0.7)
+                or any(s in t for s in ("почин", "вернут", "ернуть")))
+
     label = None
     for text, x, y, w, h in words:
-        if _like(text, "вернуться", 0.7) or _like(text, "починить", 0.7):
+        if is_label(text):
             label = (x, y, w, h)
             break
     if label is None:
-        return False
+        # подпись не прочиталась, но виден заголовок "Капитан, у вас ещё есть шанс!"
+        joined = "".join(_norm(t) for t, *_ in words)
+        if "шанс" not in joined and "естьша" not in joined:
+            return False
+        btn = _death_button(crop)
+        if btn is None:
+            log("вижу окно потопления, но не нашёл кнопку «Починить и вернуться»; OCR: "
+                + " ".join(t for t, *_ in words)[:200])
+            return False
+        target = to_full(btn[0] * k, btn[1] * k)
+        log(f"корабль потоплен - жму «Починить и вернуться» ({target[0]}, {target[1]})")
+        if not dry:
+            io.click(*target)
+        return True
     x, y, w, h = label
     cx, cy = x + w / 2, y + h / 2
     # круглая кнопка (зеленоватое кольцо) над подписью - ищем её центр по цветным пикселям
@@ -788,6 +808,24 @@ def _handle_death(io, crop, words, to_full, k, dry):
     if not dry:
         io.click(*target)
     return True
+
+
+def _death_button(crop):
+    """Зелёная круглая кнопка «Починить и вернуться» (справа от неё - красная «Выйти»).
+    Ищет крупное почти круглое зелёное пятно. Возвращает (x, y) в координатах crop или None."""
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    mask = cv2.inRange(hsv, (35, 60, 50), (95, 255, 255))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((7, 7), np.uint8))
+    n, _, stats, cent = cv2.connectedComponentsWithStats(mask)
+    side = max(crop.shape[:2])
+    best = None
+    for i in range(1, n):
+        x, y, w, h, area = stats[i]
+        if not (side * 0.05 <= w <= side * 0.25 and 0.75 <= w / max(h, 1) <= 1.33):
+            continue
+        if best is None or area > best[0]:
+            best = (area, (int(x + w / 2), int(y + h / 2)))
+    return best[1] if best else None
 
 
 def find_repair_button(full):
@@ -1077,6 +1115,7 @@ def run_bot(io, ctl=None, dry=False):
     n_frames, t_fps = 0, time.time()   # скорость цикла (кадров/с)
     t_diag = 0.0               # последняя запись диагностики "вижу, но не беру"
     t_blocked_log = 0.0        # чтобы не спамить "во все стороны монстры"
+    stuck_n = 0                # сколько раз подряд "корабль стоит"
     log("Старт сбора блёсток.")
 
     while not ctl.stopped():
@@ -1209,6 +1248,7 @@ def run_bot(io, ctl=None, dry=False):
                         f"- сохранил кадр в {DIAG_DIR}")
                     save_diag(frame, [], monsters, ignored, "color")
             if pts:
+                stuck_n = 0
                 # ближайшая к кораблю (к месту прошлого сбора)
                 ref = last_pos or pts[0]
                 target = min(pts, key=lambda p: dist2(p, ref))
@@ -1224,6 +1264,22 @@ def run_bot(io, ctl=None, dry=False):
                     heading = new_heading(heading)
                     t_heading = now
                     log(f"корабль стоит (край карты/остров?) - пробую другую сторону: {heading}")
+                    stuck_n += 1
+                    if stuck_n == 4:
+                        # долго не можем сдвинуться - вдруг окно, которое бот не узнаёт
+                        full, _ = io.grab_full()
+                        os.makedirs(DIAG_DIR, exist_ok=True)
+                        name = os.path.join(DIAG_DIR, time.strftime("%Y%m%d-%H%M%S") + "-stuck.png")
+                        cv2.imwrite(name, full)
+                        txt = ""
+                        if OCR_OK:
+                            try:
+                                hh, ww = full.shape[:2]
+                                txt = " ".join(w[0] for w in ocr_win.read_words(
+                                    full[int(hh * 0.2):int(hh * 0.85), int(ww * 0.26):int(ww * 0.74)]))
+                            except Exception:
+                                pass
+                        log(f"корабль давно стоит - сохранил кадр {name}; текст на экране: {txt[:200]}")
                 elif now - t_heading > PATROL_TURN_EVERY:
                     heading = new_heading(heading)
                     t_heading = now
