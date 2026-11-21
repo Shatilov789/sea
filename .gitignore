@@ -22,3 +22,7 @@ Screenshots/
 Снимок экрана*.png
 photo_*.jpg
 desktop.ini
+
+# Служебные файлы запущенного app.py
+app.lock
+app.url
