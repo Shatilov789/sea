@@ -833,6 +833,12 @@ def _death_button(crop):
 
 def find_repair_button(full):
     """Молоток "Ремонт" в нижней панели умений. Возвращает (x, y) или None."""
+    found = _find_hammer(full)
+    return found[0] if found else None
+
+
+def _find_hammer(full):
+    """Молоток: ((x, y), масштаб) или None."""
     global _repair_tpl
     if _repair_tpl is None:
         img = cv2.imread(REPAIR_TEMPLATE, cv2.IMREAD_GRAYSCALE)
@@ -854,8 +860,45 @@ def find_repair_button(full):
             continue
         _, score, _, p = cv2.minMaxLoc(cv2.matchTemplate(gray, t, cv2.TM_CCOEFF_NORMED))
         if score > best[0]:
-            best = (score, (int(p[0] + t.shape[1] / 2), int(top + p[1] + t.shape[0] / 2)))
-    return best[1] if best[0] >= REPAIR_THRESHOLD else None
+            best = (score, (int(p[0] + t.shape[1] / 2), int(top + p[1] + t.shape[0] / 2)), sc)
+    return (best[1], best[2]) if best[0] >= REPAIR_THRESHOLD else None
+
+
+# Полоска HP на панели - левее и выше молотка «Ремонт» (молоток - ориентир).
+# Цвет полоски меняется (зелёная при полном HP, красная при малом), поэтому читаем
+# надпись "HP: 5.000 / 40.000" OCR-ом: белый текст -> чёрный на белом.
+REPAIR_BELOW = 0.6         # HP меньше этой доли -> жмём «Ремонт»
+HP_CHECK = 10.0            # как часто смотреть на HP, сек
+REPAIR_COOLDOWN = 120.0    # после нажатия «Ремонт» столько сек не жмём снова (идёт ремонт)
+
+
+def read_hp(full):
+    """(текущее, максимум) HP с панели или None, если не прочиталось."""
+    if not OCR_OK:
+        return None
+    found = _find_hammer(full)
+    if not found:
+        return None
+    (hx, hy), sc = found
+    crop = full[max(0, int(hy - 230 * sc)):max(0, int(hy - 60 * sc)),
+                max(0, int(hx - 750 * sc)):max(0, int(hx - 150 * sc))]
+    if crop.size == 0:
+        return None
+    big = cv2.resize(crop, None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
+    hsv = cv2.cvtColor(big, cv2.COLOR_BGR2HSV)
+    text_mask = ((hsv[..., 1] < 70) & (hsv[..., 2] > 150)).astype(np.uint8) * 255
+    try:
+        text = ocr_win.read_text(cv2.cvtColor(255 - text_mask, cv2.COLOR_GRAY2BGR))
+    except Exception:
+        return None
+    # "НР: 43.255 / 40.000" (Н/Р могут прочитаться кириллицей); точки - разделители тысяч
+    m = re.search(r"[HНhн][PРpр]\W*(\d[\d.,]*)\D{1,4}(\d[\d.,]*)", text)
+    if not m:
+        return None
+    cur, mx = (int(re.sub(r"\D", "", g)) for g in m.groups())
+    if mx <= 0 or cur > mx * 2:
+        return None
+    return cur, mx
 
 
 def _handle_dont_show(io, full, words, to_full, dry):
@@ -1018,6 +1061,9 @@ def run_bot(io, ctl=None, dry=False):
                 return
             time.sleep(min(left, 0.1))
 
+    t_hp = 0.0         # последняя проверка HP
+    t_repaired = 0.0   # когда последний раз жали «Ремонт»
+    hp_warned = hp_seen = False   # для лога: один раз сказать, читается ли HP
     repair_due = 0.0   # когда нажать молоток "Ремонт" (после потопления), 0 - не нужно
 
     # --- ищем поле моря ---
@@ -1207,6 +1253,22 @@ def run_bot(io, ctl=None, dry=False):
             elif now - repair_due > REPAIR_WAIT:
                 log("молоток «Ремонт» не найден - пропускаю ремонт")
                 repair_due = 0.0
+            if not repair_due:
+                t_repaired = now
+
+        # --- корабль побит (без потопления) - тоже ремонт ---
+        if not repair_due and now - t_hp > HP_CHECK and now - t_repaired > REPAIR_COOLDOWN:
+            t_hp = now
+            hp = read_hp(io.grab_full()[0])
+            if hp is None and not hp_warned:
+                hp_warned = True
+                log("не удалось прочитать HP на панели - ремонт по HP не сработает")
+            elif hp and not hp_seen:
+                hp_seen = True
+                log(f"HP на панели читается: {hp[0]} / {hp[1]}")
+            if hp and hp[0] < hp[1] * REPAIR_BELOW:
+                log(f"HP {hp[0]} / {hp[1]} - нужен ремонт")
+                repair_due = now
 
         # --- маленькие окна: потопление, "Больше не показывать" ---
         if now - t_tutorial > TUTORIAL_RETRY:
