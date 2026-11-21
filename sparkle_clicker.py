@@ -733,6 +733,7 @@ def _like(text, word, cutoff=0.75):
 
 def handle_dialogs(io, full, dry=False):
     """Небольшие окна, которые море почти не закрывают, поэтому ищем их OCR-ом:
+    - вход из другой сессии («Войти снова» / «Выйти из игры») -> жмём «Войти снова»;
     - корабль потоплен («Починить и вернуться» / «Выйти») -> жмём «Починить и вернуться»;
     - окно с галочкой «Больше не показывать» -> ставим галочку и закрываем.
     Возвращает "death", "dont_show" или None."""
@@ -752,11 +753,75 @@ def handle_dialogs(io, full, dry=False):
     def to_full(x, y):
         return int(x0 + x / k), int(y0 + y / k)
 
+    relogin = _handle_relogin(io, crop, words, to_full, k, dry)
+    if relogin:
+        return relogin
     if _handle_death(io, crop, words, to_full, k, dry):
         return "death"
     if _handle_dont_show(io, full, words, to_full, dry):
         return "dont_show"
     return None
+
+
+# Окно «В ваш аккаунт выполнен вход из другой сессии» («Войти снова» / «Выйти из игры»).
+RELOGIN_WORDS = ["вход", "другой", "другого", "сессии", "снова", "завершена",
+                 "безопасности", "аккаунт", "выполнен"]
+RELOGIN_MAX = 3            # не больше N раз «Войти снова»...
+RELOGIN_WINDOW = 900.0     # ...за столько секунд - иначе аккаунт открыт где-то ещё, не воюем
+_relogin_times = []
+_relogin_blocked_log = 0.0
+
+
+def _relogin_button(crop):
+    """Зелёная кнопка, справа от которой на той же высоте красная: центр зелёной или None."""
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+
+    def rects(mask):
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+        n, _, st, _ = cv2.connectedComponentsWithStats(mask)
+        return [st[i][:4] for i in range(1, n)
+                if st[i][2] >= 40 and st[i][3] >= 12 and 1.8 <= st[i][2] / st[i][3] <= 7
+                and st[i][4] >= 0.5 * st[i][2] * st[i][3]]
+    green = rects(cv2.inRange(hsv, (40, 100, 90), (85, 255, 255)))
+    red = rects(cv2.inRange(hsv, (0, 120, 90), (8, 255, 255)) | cv2.inRange(hsv, (172, 120, 90), (179, 255, 255)))
+    for gx, gy, gw, gh in green:
+        for rx, ry, rw, rh in red:
+            if rx > gx + gw * 0.8 and rx - (gx + gw) < gw * 1.5 and abs((ry + rh / 2) - (gy + gh / 2)) < gh * 0.6:
+                return int(gx + gw / 2), int(gy + gh / 2)
+    return None
+
+
+def _handle_relogin(io, crop, words, to_full, k, dry):
+    """Вход из другой сессии -> «Войти снова» (но не больше RELOGIN_MAX раз за RELOGIN_WINDOW)."""
+    import difflib
+    global _relogin_times, _relogin_blocked_log
+    hits = set()
+    for text, *_ in words:
+        t = _norm(text)
+        if len(t) >= 4:
+            m = difflib.get_close_matches(t, RELOGIN_WORDS, n=1, cutoff=0.75)
+            if m:
+                hits.add(m[0])
+    if len(hits) < 2:
+        return None
+    btn = _relogin_button(crop)
+    if btn is None:
+        return None
+    now = time.time()
+    _relogin_times = [t for t in _relogin_times if now - t < RELOGIN_WINDOW]
+    if len(_relogin_times) >= RELOGIN_MAX:
+        if now - _relogin_blocked_log > 60:
+            _relogin_blocked_log = now
+            log(f"!!! в аккаунт входят из другого места уже {len(_relogin_times)} раз за "
+                f"{RELOGIN_WINDOW / 60:.0f} мин - «Войти снова» не жму, чтобы не выкидывать друг друга. "
+                "Закройте игру/бота на другом ПК.")
+        return "relogin_wait"
+    _relogin_times.append(now)
+    target = to_full(btn[0] * k, btn[1] * k)
+    log(f"в аккаунт вошли из другой сессии - жму «Войти снова» ({target[0]}, {target[1]})")
+    if not dry:
+        io.click(*target)
+    return "relogin"
 
 
 def _handle_death(io, crop, words, to_full, k, dry):
