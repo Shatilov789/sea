@@ -720,7 +720,7 @@ def _norm(text):
 
 
 REPAIR_TEMPLATE = "repair_hammer.png"   # молоток "Ремонт" в нижней панели (с экрана 2560x1440)
-REPAIR_THRESHOLD = 0.8
+REPAIR_THRESHOLD = 0.75
 REPAIR_WAIT = 20.0         # сколько секунд после возвращения искать молоток
 _repair_tpl = None
 
@@ -840,12 +840,16 @@ def find_repair_button(full):
             return None
         _repair_tpl = img
     gray = cv2.cvtColor(full, cv2.COLOR_BGR2GRAY)
-    top = gray.shape[0] // 2            # панель внизу экрана
+    top = int(gray.shape[0] * 0.7)      # панель умений - в самом низу экрана
     gray = gray[top:]
     base = _scale_guess(full)
+    # в фоновом браузере панель рисуется почти в натуральную величину, хотя окно меньше
+    # 2560 px - поэтому кроме масштаба от размера окна пробуем и обычные масштабы
+    scales = sorted({round(base * kk, 2) for kk in (0.85, 0.92, 1.0, 1.08, 1.15)}
+                    | {0.7, 0.8, 0.9, 1.0, 1.1, 1.2})
     best = (0.0, None)
-    for kk in (0.85, 0.92, 1.0, 1.08, 1.15):
-        t = cv2.resize(_repair_tpl, None, fx=base * kk, fy=base * kk, interpolation=cv2.INTER_AREA)
+    for sc in scales:
+        t = cv2.resize(_repair_tpl, None, fx=sc, fy=sc, interpolation=cv2.INTER_AREA)
         if t.shape[0] < 10 or t.shape[0] >= gray.shape[0]:
             continue
         _, score, _, p = cv2.minMaxLoc(cv2.matchTemplate(gray, t, cv2.TM_CCOEFF_NORMED))
