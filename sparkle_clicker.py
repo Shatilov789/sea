@@ -1063,7 +1063,7 @@ def run_bot(io, ctl=None, dry=False):
 
     t_hp = 0.0         # последняя проверка HP
     t_repaired = 0.0   # когда последний раз жали «Ремонт»
-    hp_warned = hp_seen = False   # для лога: один раз сказать, читается ли HP
+    hp_ok = None       # читалось ли HP при прошлой проверке (для лога)
     repair_due = 0.0   # когда нажать молоток "Ремонт" (после потопления), 0 - не нужно
 
     # --- ищем поле моря ---
@@ -1260,12 +1260,12 @@ def run_bot(io, ctl=None, dry=False):
         if not repair_due and now - t_hp > HP_CHECK and now - t_repaired > REPAIR_COOLDOWN:
             t_hp = now
             hp = read_hp(io.grab_full()[0])
-            if hp is None and not hp_warned:
-                hp_warned = True
-                log("не удалось прочитать HP на панели - ремонт по HP не сработает")
-            elif hp and not hp_seen:
-                hp_seen = True
+            # в лог - только когда меняется "читается / не читается" (проверка идёт каждые HP_CHECK сек)
+            if hp is None and hp_ok is not False:
+                log(f"HP на панели не читается (закрыто окном?) - проверю снова через {HP_CHECK:.0f} сек")
+            elif hp and hp_ok is not True:
                 log(f"HP на панели читается: {hp[0]} / {hp[1]}")
+            hp_ok = hp is not None
             if hp and hp[0] < hp[1] * REPAIR_BELOW:
                 log(f"HP {hp[0]} / {hp[1]} - нужен ремонт")
                 repair_due = now
