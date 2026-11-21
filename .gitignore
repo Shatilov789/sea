@@ -26,3 +26,6 @@ desktop.ini
 # Служебные файлы запущенного app.py
 app.lock
 app.url
+
+# Личные настройки (ник) - у каждого ПК свои
+config.json
