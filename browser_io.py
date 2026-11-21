@@ -67,8 +67,18 @@ class BrowserIO:
         self._goto_game()
         self._sleep_pumping(3)
         if not self._login_form_visible():
-            sc.log("вход уже выполнен (сохранённая сессия)")
-            return
+            if not self._wait_game_or_expired():
+                sc.log("вход уже выполнен (сохранённая сессия)")
+                return
+            # окно «Сеанс истёк» рисует сама игра (не страница) - сбрасываем старый вход,
+            # тогда сайт покажет свою обычную форму входа
+            sc.log("игра пишет «Сеанс истёк» - сбрасываю старый вход и вхожу заново")
+            self.ctx.clear_cookies()
+            self._goto_game()
+            self._sleep_pumping(3)
+            if not self._login_form_visible():
+                raise LoginError("Сеанс истёк, но форма входа сайта не открылась "
+                                 "(см. картинку в окне управления).")
         if not username or not password:
             raise LoginError("Нужно войти: введите логин и пароль в окне управления.")
         sc.log("вхожу в аккаунт...")
@@ -100,6 +110,35 @@ class BrowserIO:
         self._sleep_pumping(3)
         if self._login_form_visible():
             raise LoginError("Сайт снова просит войти - вход не сохранился.")
+
+    EXPIRED_WORDS = ["войти", "сеанс", "истек", "войдите", "аккаунт", "аккаунты",
+                     "забыли", "сохранить", "сохраненные"]
+    EXPIRED_WAIT = 45   # сколько секунд ждать, пока загрузится игра или экран входа
+
+    def _wait_game_or_expired(self):
+        """Ждёт загрузки игры. True - игра показала свой экран входа («Сеанс истёк»),
+        False - видно море (или так и не поняли - тогда ведём себя как раньше)."""
+        import difflib
+        import re
+        t_end = time.time() + self.EXPIRED_WAIT
+        while time.time() < t_end:
+            self._sleep_pumping(2)
+            full, _ = self.grab_full()
+            if sc.sea_fraction(full) > 0.03:     # море видно (хотя бы из-под окон) - игра идёт
+                return False
+            if not sc.OCR_OK:
+                continue
+            h, w = full.shape[:2]
+            crop = full[int(h * 0.55):int(h * 0.95), int(w * 0.3):int(w * 0.75)]
+            try:
+                text = sc.ocr_win.read_text(cv2.resize(crop, None, fx=2, fy=2,
+                                                       interpolation=cv2.INTER_CUBIC))
+            except Exception:
+                continue
+            for word in re.findall(r"[а-яё]{4,}", text.lower().replace("ё", "е")):
+                if difflib.get_close_matches(word, self.EXPIRED_WORDS, n=1, cutoff=0.75):
+                    return True
+        return False
 
     def _js_click_button(self, texts):
         """Нажать видимую кнопку/ссылку с одним из текстов (без ожидания анимаций)."""
