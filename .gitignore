@@ -1,0 +1,24 @@
+# Профиль браузера: cookies и сессии входа - НЕ заливать
+browser_profile/
+
+# Python / IDE
+__pycache__/
+*.pyc
+.idea/
+.venv/
+venv/
+
+# Отладка и результаты работы
+debug*.png
+ocr_fail/
+diag/
+sessions_log.csv
+
+# Архивы, скриншоты, фото
+*.rar
+*.zip
+Screenshots/
+Скриншот-*.jpg
+Снимок экрана*.png
+photo_*.jpg
+desktop.ini

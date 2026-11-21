@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Сборщик блёсток</title>
+<style>
+  :root {
+    --bg: #0d1418;
+    --panel: #151f25;
+    --panel-2: #1b282f;
+    --line: #2a3a43;
+    --text: #e6edf0;
+    --muted: #8fa3ad;
+    --gold: #d9a441;
+    --gold-2: #f0c36a;
+    --sea: #1f6f78;
+    --ok: #4cc38a;
+    --warn: #e5b545;
+    --bad: #e5675e;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 "Segoe UI", system-ui, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: .2px; }
+  header h1 span { color: var(--gold); }
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px; padding: 4px 11px;
+    border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line);
+    font-size: 13px; color: var(--muted);
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .pill.running .dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .pill.paused .dot, .pill.starting .dot, .pill.stopping .dot { background: var(--warn); }
+  .pill.error .dot { background: var(--bad); }
+  #msg { color: var(--muted); font-size: 13px; }
+  #msg.error { color: var(--bad); }
+
+  main {
+    display: grid; gap: 16px; padding: 16px 20px 24px;
+    grid-template-columns: 320px minmax(0, 1fr);
+    max-width: 1500px; margin: 0 auto;
+  }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; padding: 12px 16px; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 16px;
+  }
+  .card h2 {
+    margin: 0 0 12px; font-size: 12px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .8px; color: var(--muted);
+  }
+  .col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+  label.f { display: block; margin-bottom: 10px; }
+  label.f span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  input[type=text], input[type=password] {
+    width: 100%; padding: 9px 11px; border-radius: 7px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); font: inherit;
+  }
+  input:focus { outline: 2px solid var(--sea); border-color: transparent; }
+  .check { display: flex; align-items: center; gap: 8px; margin: 6px 0; color: var(--text); cursor: pointer; }
+  .hint { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+  .hint a { color: var(--gold-2); cursor: pointer; }
+
+  .buttons { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 14px; }
+  button {
+    padding: 10px 8px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--panel-2); color: var(--text); font: inherit; font-weight: 600;
+    cursor: pointer; transition: filter .15s, opacity .15s;
+  }
+  button:hover:not(:disabled) { filter: brightness(1.2); }
+  button:disabled { opacity: .4; cursor: default; }
+  #btnStart { background: var(--gold); color: #1a1205; border-color: var(--gold); }
+  #btnStop { color: var(--bad); }
+
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .stat { background: var(--panel-2); border-radius: 8px; padding: 10px 12px; }
+  .stat .v { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stat .k { font-size: 12px; color: var(--muted); }
+  .rewards { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .reward { display: flex; justify-content: space-between; gap: 10px; padding: 8px 12px;
+            background: var(--panel-2); border-radius: 8px; font-variant-numeric: tabular-nums; }
+  .reward b { color: var(--gold-2); }
+  .reward small { color: var(--muted); }
+
+  .view {
+    position: relative; background: #000; border-radius: 8px; overflow: hidden;
+    aspect-ratio: 16 / 9; border: 1px solid var(--line);
+  }
+  .view img { width: 100%; height: 100%; display: block; object-fit: contain; cursor: crosshair; }
+  .view .empty {
+    position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted);
+    text-align: center; padding: 20px;
+  }
+  .view .ping {
+    position: absolute; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%;
+    border: 2px solid var(--gold-2); pointer-events: none; animation: ping .6s ease-out forwards;
+  }
+  @keyframes ping { to { transform: scale(2.2); opacity: 0; } }
+
+  #log {
+    height: 260px; overflow-y: auto; margin: 0; padding: 10px 12px; border-radius: 8px;
+    background: var(--bg); border: 1px solid var(--line);
+    font: 12.5px/1.5 Consolas, "Cascadia Mono", monospace; color: #c4d2d8; white-space: pre-wrap;
+  }
+  #log .plus { color: var(--gold-2); }
+  #log .err { color: var(--bad); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Sea of Prime · <span>сборщик блёсток</span></h1>
+  <div id="pill" class="pill idle"><span class="dot"></span><span id="stateText">Остановлен</span></div>
+  <div id="msg"></div>
+</header>
+
+<main>
+  <div class="col">
+    <section class="card">
+      <h2>Вход в игру</h2>
+      <label class="f"><span>Логин</span><input id="user" type="text" autocomplete="username"></label>
+      <label class="f"><span>Пароль</span><input id="pass" type="password" autocomplete="current-password"></label>
+      <label class="check"><input id="remember" type="checkbox"> Запомнить пароль</label>
+      <label class="check"><input id="showBrowser" type="checkbox"> Показывать окно браузера</label>
+      <p class="hint" id="pwHint"></p>
+
+      <div class="buttons">
+        <button id="btnStart">Старт</button>
+        <button id="btnPause" disabled>Пауза</button>
+        <button id="btnStop" disabled>Стоп</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Эта сессия</h2>
+      <div class="stats">
+        <div class="stat"><div class="v" id="sTime">0:00</div><div class="k">время</div></div>
+        <div class="stat"><div class="v" id="sCount">0</div><div class="k">блёсток <span id="sRate"></span></div></div>
+      </div>
+      <div class="rewards" id="rewards"></div>
+    </section>
+  </div>
+
+  <div class="col">
+    <section class="card">
+      <h2>Игра (клик по картинке = клик в игре)</h2>
+      <div class="view" id="view">
+        <img id="frame" alt="" hidden>
+        <div class="empty" id="empty">Нажмите «Старт». Здесь появится картинка из фонового браузера.</div>
+      </div>
+    </section>
+    <section class="card">
+      <h2>Лог</h2>
+      <pre id="log"></pre>
+    </section>
+  </div>
+</main>
+
+<script>
+const TOKEN = "__TOKEN__";
+const $ = id => document.getElementById(id);
+const STATE_TEXT = { idle: "Остановлен", starting: "Запуск…", running: "Работает",
+                     paused: "Пауза", stopping: "Останавливаю…", error: "Ошибка" };
+let state = "idle", logSeq = 0, hasSavedPw = false;
+
+async function api(path, body) {
+  const opt = { headers: { "X-Token": TOKEN } };
+  if (body !== undefined) {
+    opt.method = "POST";
+    opt.headers["Content-Type"] = "application/json";
+    opt.body = JSON.stringify(body);
+  }
+  const r = await fetch(path, opt);
+  return r.headers.get("content-type")?.includes("json") ? r.json() : r;
+}
+
+function fmtTime(s) {
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`
+           : `${m}:${String(sec).padStart(2, "0")}`;
+}
+const num = n => n.toLocaleString("ru-RU");
+
+function render(d) {
+  state = d.state;
+  const pill = $("pill");
+  pill.className = "pill " + state;
+  $("stateText").textContent = STATE_TEXT[state] || state;
+  $("msg").textContent = d.message || "";
+  $("msg").className = state === "error" ? "error" : "";
+
+  const active = ["starting", "running", "paused", "stopping"].includes(state);
+  $("btnStart").disabled = active;
+  $("btnPause").disabled = !["running", "paused"].includes(state);
+  $("btnPause").textContent = state === "paused" ? "Продолжить" : "Пауза";
+  $("btnStop").disabled = !(active || state === "error") || state === "stopping";
+  for (const id of ["user", "pass", "remember", "showBrowser"]) $(id).disabled = active;
+
+  if (d.stats) {
+    const s = d.stats, hours = s.seconds / 3600;
+    $("sTime").textContent = fmtTime(s.seconds);
+    $("sCount").textContent = num(s.sparkles);
+    $("sRate").textContent = s.seconds >= 300 ? `· ${num(Math.round(s.sparkles / hours))}/час` : "";
+    const rows = Object.entries(s.rewards).sort((a, b) => b[1] - a[1]).map(([k, v]) => {
+      const rate = s.seconds >= 300 ? `<small>${num(Math.round(v / hours))}/час</small>` : "";
+      return `<div class="reward"><span>${k}</span><span><b>${num(v)}</b> ${rate}</span></div>`;
+    });
+    if (s.unread) rows.push(`<div class="reward"><span>награда не прочитана</span><small>${s.unread} раз</small></div>`);
+    $("rewards").innerHTML = rows.join("");
+  }
+
+  if (d.logs && d.logs.length) {
+    const box = $("log");
+    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 30;
+    for (const line of d.logs) {
+      const el = document.createElement("div");
+      el.textContent = line;
+      if (/\] \+\d/.test(line)) el.className = "plus";
+      else if (/Ошибка|не удалось|Не удалось/.test(line)) el.className = "err";
+      box.appendChild(el);
+    }
+    while (box.childNodes.length > 400) box.removeChild(box.firstChild);
+    if (atBottom) box.scrollTop = box.scrollHeight;
+  }
+  logSeq = d.log_seq;
+}
+
+async function poll() {
+  try { render(await api("/api/state?since=" + logSeq)); } catch (e) { $("msg").textContent = "нет связи с программой"; }
+}
+
+let frameUrl = null;
+async function pollFrame() {
+  if (!["starting", "running", "paused", "error", "stopping"].includes(state)) return;
+  try {
+    const r = await fetch("/api/frame.jpg", { headers: { "X-Token": TOKEN } });
+    if (r.status !== 200) return;
+    const url = URL.createObjectURL(await r.blob());
+    $("frame").src = url;
+    $("frame").hidden = false;
+    $("empty").hidden = true;
+    if (frameUrl) URL.revokeObjectURL(frameUrl);
+    frameUrl = url;
+  } catch (e) {}
+}
+
+$("frame").addEventListener("click", async e => {
+  const img = e.currentTarget, rect = img.getBoundingClientRect();
+  // картинка 16:9 вписана в рамку; считаем координаты внутри самой картинки
+  const ratio = img.naturalWidth / img.naturalHeight || 16 / 9;
+  let w = rect.width, h = rect.width / ratio;
+  if (h > rect.height) { h = rect.height; w = h * ratio; }
+  const ox = (rect.width - w) / 2, oy = (rect.height - h) / 2;
+  const x = (e.clientX - rect.left - ox) / w, y = (e.clientY - rect.top - oy) / h;
+  if (x < 0 || x > 1 || y < 0 || y > 1) return;
+  const ping = document.createElement("div");
+  ping.className = "ping";
+  ping.style.left = (e.clientX - rect.left) + "px";
+  ping.style.top = (e.clientY - rect.top) + "px";
+  $("view").appendChild(ping);
+  setTimeout(() => ping.remove(), 700);
+  await api("/api/click", { x, y });
+});
+
+$("btnStart").onclick = async () => {
+  const body = { username: $("user").value.trim(), password: $("pass").value,
+                 remember: $("remember").checked, headless: !$("showBrowser").checked };
+  const r = await api("/api/start", body);
+  if (!r.ok && r.message) $("msg").textContent = r.message;
+  $("pass").value = "";
+  poll();
+};
+$("btnPause").onclick = () => api(state === "paused" ? "/api/resume" : "/api/pause", {}).then(poll);
+$("btnStop").onclick = () => api("/api/stop", {}).then(poll);
+
+function updatePwHint() {
+  const parts = [];
+  if (hasSavedPw) parts.push('Пароль сохранён в Windows — поле можно оставить пустым. <a id="forget">Забыть пароль</a>');
+  else parts.push("После первого входа сессия запоминается, и пароль обычно больше не нужен.");
+  $("pwHint").innerHTML = parts.join(" ");
+  const f = $("forget");
+  if (f) f.onclick = async () => { await api("/api/forget", {}); hasSavedPw = false; $("remember").checked = false; updatePwHint(); };
+}
+
+(async () => {
+  try {
+    const c = await api("/api/config");
+    $("user").value = c.username || "";
+    $("showBrowser").checked = c.headless === false;
+    hasSavedPw = c.has_password;
+    $("remember").checked = c.has_password;
+    if (!c.keyring) { $("remember").disabled = true; $("remember").parentElement.title = "keyring не установлен"; }
+  } catch (e) {}
+  updatePwHint();
+  poll();
+  setInterval(poll, 1000);
+  setInterval(pollFrame, 250);
+})();
+</script>
+</body>
+</html>
