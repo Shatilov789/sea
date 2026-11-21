@@ -902,16 +902,28 @@ def _handle_dont_show(io, full, words, to_full, dry):
     return True
 
 
+CLAIM_REPEAT = 15.0   # та же кнопка «Получить» в течение N сек после нажатия -> закрыть окно
+_last_claim = (0.0, (0, 0))
+
+
 def handle_popups(io, full, dry=False):
     """Море закрыто окном: забрать подарок, иначе закрыть окно крестиком, иначе Esc."""
     found = handle_dialogs(io, full, dry)
     if found:
         return found
+    global _last_claim
     claim = find_claim_button(full)
+    if claim:
+        t, pos = _last_claim
+        # кнопка на том же месте сразу после нажатия - подарок уже забран, окно надо закрыть
+        if time.time() - t < CLAIM_REPEAT and dist2(pos, claim[:2]) < 40 ** 2:
+            log("подарок забран - закрываю окно")
+            claim = None
     if claim:
         log(f"вижу кнопку «{claim[2]}» - забираю подарок")
         if not dry:
             io.click(claim[0], claim[1])
+        _last_claim = (time.time(), claim[:2])
         return "claim"
     close = find_close_button(full)
     if close:
