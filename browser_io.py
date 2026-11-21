@@ -108,6 +108,11 @@ class BrowserIO:
         self._sleep_pumping(3)
         if self._login_form_visible():
             raise LoginError("Сайт снова просит войти - вход не сохранился.")
+        # после входа через сайт игра может ещё раз спросить логин в своём окне
+        btn = self._wait_game_or_expired()
+        if btn is not None:
+            sc.log("игра просит войти ещё раз - вхожу через окно игры")
+            self._unity_login(username, password, btn)
 
     EXPIRED_WORDS = ["войти", "сеанс", "истек", "войдите", "аккаунт", "аккаунты",
                      "забыли", "сохранить", "сохраненные"]
