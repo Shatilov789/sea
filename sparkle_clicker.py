@@ -901,7 +901,7 @@ def _find_hammer(full):
     # в фоновом браузере панель рисуется почти в натуральную величину, хотя окно меньше
     # 2560 px - поэтому кроме масштаба от размера окна пробуем и обычные масштабы
     scales = sorted({round(base * kk, 2) for kk in (0.85, 0.92, 1.0, 1.08, 1.15)}
-                    | {0.7, 0.8, 0.9, 1.0, 1.1, 1.2})
+                    | {0.5, 0.55, 0.6, 0.65, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2})   # мелкие - панель сбоку в углу
     best = (0.0, None)
     for sc in scales:
         t = cv2.resize(_repair_tpl, None, fx=sc, fy=sc, interpolation=cv2.INTER_AREA)
@@ -1323,7 +1323,10 @@ def run_bot(io, ctl=None, dry=False):
                     io.click(*hammer)
                 repair_due = 0.0
             elif now - repair_due > REPAIR_WAIT:
-                log("молоток «Ремонт» не найден - пропускаю ремонт")
+                os.makedirs(DIAG_DIR, exist_ok=True)
+                name = os.path.join(DIAG_DIR, time.strftime("%Y%m%d-%H%M%S") + "-nohammer.png")
+                cv2.imwrite(name, full)
+                log(f"молоток «Ремонт» не найден - пропускаю ремонт (кадр: {name})")
                 repair_due = 0.0
             if not repair_due:
                 t_repaired = now
