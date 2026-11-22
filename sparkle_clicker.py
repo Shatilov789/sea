@@ -1052,6 +1052,24 @@ def new_heading(old=None):
     return random.choice(names)
 
 
+COMPASS = ["север", "северо-восток", "восток", "юго-восток", "юг", "юго-запад", "запад", "северо-запад"]
+BLOCKED_FOR = 60.0   # направление, где корабль упёрся, избегаем столько сек
+
+
+def away_heading(blocked, now):
+    """Курс подальше от направлений, где корабль недавно упирался (угол/край карты):
+    в углу на северо-востоке -> юго-запад, а не случайная сторона, которая снова в стену."""
+    recent = [COMPASS.index(n) for n, t in blocked.items() if now - t < BLOCKED_FOR]
+
+    def gap(i):   # сколько шагов компаса до ближайшего "тупика"
+        return min(min(abs(i - j), 8 - abs(i - j)) for j in recent)
+    free = [i for i in range(8) if i not in recent]
+    if not recent or not free:
+        return new_heading()
+    best = max(gap(i) for i in free)
+    return COMPASS[random.choice([i for i in free if gap(i) == best])]
+
+
 class DesktopIO:
     """Работа с вашим настоящим экраном и мышью (mss + pyautogui)."""
     wait_for_game = False   # поле моря не найдено -> берём SEA_REGION из настроек
@@ -1230,6 +1248,7 @@ def run_bot(io, ctl=None, dry=False):
     t_diag = 0.0               # последняя запись диагностики "вижу, но не беру"
     t_blocked_log = 0.0        # чтобы не спамить "во все стороны монстры"
     stuck_n = 0                # сколько раз подряд "корабль стоит"
+    blocked = {}               # направление -> когда в той стороне корабль упёрся
     log("Старт сбора блёсток.")
 
     while not ctl.stopped():
@@ -1395,7 +1414,8 @@ def run_bot(io, ctl=None, dry=False):
             elif now - t_activity > PATROL_AFTER and (now - t_patrol > PATROL_EVERY or standing):
                 # блёсток нет - плывём дальше в выбранном направлении
                 if standing and patrolling:
-                    heading = new_heading(heading)
+                    blocked[heading] = now
+                    heading = away_heading(blocked, now)
                     t_heading = now
                     log(f"корабль стоит (край карты/остров?) - пробую другую сторону: {heading}")
                     stuck_n += 1
