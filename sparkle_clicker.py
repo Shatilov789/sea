@@ -1264,6 +1264,10 @@ def run_bot(io, ctl=None, dry=False):
 
         io.pump()
         now = time.time()
+        # горячая клавиша R - ремонт сейчас (младший бит: была нажата с прошлой проверки)
+        if ctypes.windll.user32.GetAsyncKeyState(0x52) & 1 and not repair_due:
+            log("нажата R - ремонт")
+            repair_due = now
         ignored = [g for g in ignored if g[2] > now]
         frame = io.grab_region()
 
