@@ -733,7 +733,7 @@ def _like(text, word, cutoff=0.75):
 
 def handle_dialogs(io, full, dry=False):
     """Небольшие окна, которые море почти не закрывают, поэтому ищем их OCR-ом:
-    - вход из другой сессии («Войти снова» / «Выйти из игры») -> жмём «Войти снова»;
+    - вход из другой сессии / «Переподключить» -> ничего не жмём, завершаем бота (SessionLost);
     - корабль потоплен («Починить и вернуться» / «Выйти») -> жмём «Починить и вернуться»;
     - окно с галочкой «Больше не показывать» -> ставим галочку и закрываем.
     Возвращает "death", "dont_show" или None."""
@@ -763,13 +763,14 @@ def handle_dialogs(io, full, dry=False):
     return None
 
 
-# Окно «В ваш аккаунт выполнен вход из другой сессии» («Войти снова» / «Выйти из игры»).
+# Окно «В ваш аккаунт выполнен вход из другой сессии» («Войти снова» / «Выйти из игры»)
+# или «Переподключить» - ничего не нажимаем, завершаем бота.
 RELOGIN_WORDS = ["вход", "другой", "другого", "сессии", "снова", "завершена",
-                 "безопасности", "аккаунт", "выполнен"]
-RELOGIN_MAX = 3            # не больше N раз «Войти снова»...
-RELOGIN_WINDOW = 900.0     # ...за столько секунд - иначе аккаунт открыт где-то ещё, не воюем
-_relogin_times = []
-_relogin_blocked_log = 0.0
+                 "безопасности", "аккаунт", "выполнен", "переподключить"]
+
+
+class SessionLost(Exception):
+    """Игра просит войти снова / переподключиться - бот завершается."""
 
 
 def _relogin_button(crop):
@@ -792,9 +793,8 @@ def _relogin_button(crop):
 
 
 def _handle_relogin(io, crop, words, to_full, k, dry):
-    """Вход из другой сессии -> «Войти снова» (но не больше RELOGIN_MAX раз за RELOGIN_WINDOW)."""
+    """Вход из другой сессии / «Переподключить» -> ничего не жмём, SessionLost (бот завершается)."""
     import difflib
-    global _relogin_times, _relogin_blocked_log
     hits = set()
     for text, *_ in words:
         t = _norm(text)
@@ -802,26 +802,10 @@ def _handle_relogin(io, crop, words, to_full, k, dry):
             m = difflib.get_close_matches(t, RELOGIN_WORDS, n=1, cutoff=0.75)
             if m:
                 hits.add(m[0])
-    if len(hits) < 2:
+    if "переподключить" not in hits and (len(hits) < 2 or _relogin_button(crop) is None):
         return None
-    btn = _relogin_button(crop)
-    if btn is None:
-        return None
-    now = time.time()
-    _relogin_times = [t for t in _relogin_times if now - t < RELOGIN_WINDOW]
-    if len(_relogin_times) >= RELOGIN_MAX:
-        if now - _relogin_blocked_log > 60:
-            _relogin_blocked_log = now
-            log(f"!!! в аккаунт входят из другого места уже {len(_relogin_times)} раз за "
-                f"{RELOGIN_WINDOW / 60:.0f} мин - «Войти снова» не жму, чтобы не выкидывать друг друга. "
-                "Закройте игру/бота на другом ПК.")
-        return "relogin_wait"
-    _relogin_times.append(now)
-    target = to_full(btn[0] * k, btn[1] * k)
-    log(f"в аккаунт вошли из другой сессии - жму «Войти снова» ({target[0]}, {target[1]})")
-    if not dry:
-        io.click(*target)
-    return "relogin"
+    log("окно «Войти снова / Переподключить» - ничего не жму, завершаю бота")
+    raise SessionLost()
 
 
 def _handle_death(io, crop, words, to_full, k, dry):

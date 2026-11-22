@@ -128,6 +128,8 @@ class BotManager:
             sc.run_bot(io, ctl=self)
         except Stopped:
             sc.log("остановлено")
+        except sc.SessionLost:
+            sc.log("бот завершён: игра просит войти снова / переподключиться")
         except LoginError as e:
             sc.log(str(e))
             self._set("error", str(e))
