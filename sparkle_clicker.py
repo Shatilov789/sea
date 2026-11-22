@@ -403,6 +403,31 @@ def dist2(a, b):
     return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
 
 
+ROUTE_MAX = 7   # сколько ближайших блёсток учитывать в маршруте (7! = 5040 вариантов - быстро)
+
+
+def plan_route(start, pts):
+    """Кратчайший путь от start через все блёстки (перебор порядков среди ROUTE_MAX ближайших).
+    Возвращает список точек в порядке сбора."""
+    import itertools
+    pts = sorted(pts, key=lambda p: dist2(p, start))[:ROUTE_MAX]
+    if len(pts) <= 1:
+        return pts
+    n = len(pts)
+    d0 = [dist2(start, p) ** 0.5 for p in pts]
+    d = [[dist2(a, b) ** 0.5 for b in pts] for a in pts]
+    best, best_len = None, float("inf")
+    for order in itertools.permutations(range(n)):
+        length = d0[order[0]]
+        for i in range(1, n):
+            length += d[order[i - 1]][order[i]]
+            if length >= best_len:
+                break
+        else:
+            best, best_len = order, length
+    return [pts[i] for i in best]
+
+
 LOG_HOOK = None   # интерфейс подписывается сюда, чтобы показывать лог
 
 
@@ -1389,15 +1414,18 @@ def run_bot(io, ctl=None, dry=False):
                     save_diag(frame, [], monsters, ignored, "color")
             if pts:
                 stuck_n = 0
-                # ближайшая к кораблю (к месту прошлого сбора)
-                ref = last_pos or pts[0]
-                target = min(pts, key=lambda p: dist2(p, ref))
+                # кратчайший маршрут через все видимые блёстки от корабля (места прошлого сбора
+                # или центра обзора) - плывём к первой; после сбора маршрут строится заново
+                ref = last_pos or ((SEA_REGION[0] + SEA_REGION[2]) // 2, (SEA_REGION[1] + SEA_REGION[3]) // 2)
+                route = plan_route(ref, pts)
+                target = route[0]
                 click_sparkle(target)
                 patrolling = False
                 target_clicks = 1
                 t_click = t_first = t_seen = now
                 t_activity = now
-                log(f"цель ({target[0]}, {target[1]}), клик; блёсток на экране: {len(pts)}")
+                log(f"цель ({target[0]}, {target[1]}), клик; блёсток на экране: {len(pts)}"
+                    + (f", маршрут: {' -> '.join(f'({x}, {y})' for x, y in route)}" if len(route) > 1 else ""))
             elif now - t_activity > PATROL_AFTER and (now - t_patrol > PATROL_EVERY or standing):
                 # блёсток нет - плывём дальше в выбранном направлении
                 if standing and patrolling:
