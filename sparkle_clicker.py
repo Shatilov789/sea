@@ -721,7 +721,6 @@ def _norm(text):
 
 REPAIR_TEMPLATE = "repair_hammer.png"   # молоток "Ремонт" в нижней панели (с экрана 2560x1440)
 REPAIR_THRESHOLD = 0.75
-REPAIR_WAIT = 20.0         # сколько секунд после возвращения искать молоток
 _repair_tpl = None
 
 
@@ -878,12 +877,6 @@ def _death_button(crop):
         if best is None or area > best[0]:
             best = (area, (int(x + w / 2), int(y + h / 2)))
     return best[1] if best else None
-
-
-def find_repair_button(full):
-    """Молоток "Ремонт" в нижней панели умений. Возвращает (x, y) или None."""
-    found = _find_hammer(full)
-    return found[0] if found else None
 
 
 def _find_hammer(full):
@@ -1313,23 +1306,14 @@ def run_bot(io, ctl=None, dry=False):
         # надпись висит пару секунд - засчитываем один раз и сразу ищем следующую
         popup_was = popup is not None
 
-        # --- после возвращения из потопления жмём молоток "Ремонт" ---
+        # --- ремонт: клавиша R в игре (молоток искать не нужно) ---
         if repair_due and now >= repair_due:
-            full, _ = io.grab_full()
-            hammer = find_repair_button(full)
-            if hammer:
-                log(f"жму «Ремонт» (молоток) ({hammer[0]}, {hammer[1]})")
-                if not dry:
-                    io.click(*hammer)
-                repair_due = 0.0
-            elif now - repair_due > REPAIR_WAIT:
-                os.makedirs(DIAG_DIR, exist_ok=True)
-                name = os.path.join(DIAG_DIR, time.strftime("%Y%m%d-%H%M%S") + "-nohammer.png")
-                cv2.imwrite(name, full)
-                log(f"молоток «Ремонт» не найден - пропускаю ремонт (кадр: {name})")
-                repair_due = 0.0
-            if not repair_due:
-                t_repaired = now
+            log("жму R - ремонт")
+            if not dry:
+                io.key("r")
+                ctypes.windll.user32.GetAsyncKeyState(0x52)   # своё нажатие - не горячая клавиша
+            repair_due = 0.0
+            t_repaired = now
 
         # --- корабль побит (без потопления) - тоже ремонт ---
         if not repair_due and now - t_hp > HP_CHECK and now - t_repaired > REPAIR_COOLDOWN:
